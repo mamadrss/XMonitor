@@ -45,8 +45,10 @@ body{
   width:8px;height:8px;border-radius:50%;
   box-shadow:0 0 6px currentColor;
 }
-.conn-status.ok{color:var(--green);background:var(--green)}
-.conn-status.err{color:var(--red);background:var(--red)}
+.conn-status.ok{color:var(--green);background:var(--green);animation:pulse-green 2s ease infinite}
+.conn-status.err{color:var(--red);background:var(--red);animation:pulse-red 1.5s ease infinite}
+@keyframes pulse-green{0%,100%{box-shadow:0 0 4px var(--green)}50%{box-shadow:0 0 12px var(--green)}}
+@keyframes pulse-red{0%,100%{box-shadow:0 0 4px var(--red)}50%{box-shadow:0 0 10px var(--red)}}
 .btn-sm{
   padding:.4rem .8rem;font-size:.75rem;border:1px solid var(--border);
   border-radius:6px;background:transparent;color:var(--text-dim);cursor:pointer;
@@ -83,10 +85,10 @@ body{
 }
 
 /* Metric value */
-.metric{font-size:2rem;font-weight:700;line-height:1.1}
+.metric{font-size:2rem;font-weight:700;line-height:1.1;transition:color .3s}
 .metric-sm{font-size:1.25rem}
 .metric-unit{font-size:.7em;color:var(--text-dim);font-weight:400}
-.metric-sub{font-size:.8rem;color:var(--text-dim);margin-top:.25rem}
+.metric-sub{font-size:.8rem;color:var(--text-dim);margin-top:.25rem;transition:color .3s}
 
 /* Progress bars */
 .progress-wrap{margin:.5rem 0}
@@ -98,7 +100,7 @@ body{
   height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;
 }
 .progress-fill{
-  height:100%;border-radius:3px;transition:width .6s ease;
+  height:100%;border-radius:3px;transition:width 1s cubic-bezier(.4,0,.2,1);
   background:linear-gradient(90deg,var(--accent),var(--accent2));
 }
 .progress-fill.warn{background:linear-gradient(90deg,var(--orange),var(--red))}
@@ -110,7 +112,7 @@ body{
   flex:1;min-width:80px;padding:.6rem;
   background:rgba(255,255,255,.03);border-radius:8px;text-align:center;
 }
-.stat-item .val{font-size:1.1rem;font-weight:600}
+.stat-item .val{font-size:1.1rem;font-weight:600;transition:color .3s}
 .stat-item .lbl{font-size:.65rem;color:var(--text-dim);margin-top:.15rem}
 
 /* Disk table */
@@ -136,7 +138,7 @@ body{
   border:1px solid rgba(255,255,255,.04);
 }
 .nic-name{font-weight:600;font-size:.85rem;margin-bottom:.5rem;color:var(--cyan)}
-.nic-row{display:flex;justify-content:space-between;font-size:.75rem;padding:.15rem 0}
+.nic-row{display:flex;justify-content:space-between;font-size:.75rem;padding:.15rem 0;transition:color .3s}
 .rx-color{color:var(--green)}
 .tx-color{color:var(--accent2)}
 
@@ -149,7 +151,7 @@ body{
   padding:.5rem .75rem;background:rgba(255,255,255,.03);border-radius:8px;
 }
 .qs-icon{font-size:1rem;width:24px;text-align:center}
-.qs-text .qs-val{font-size:.85rem;font-weight:600}
+.qs-text .qs-val{font-size:.85rem;font-weight:600;transition:color .3s}
 .qs-text .qs-lbl{font-size:.65rem;color:var(--text-dim)}
 
 /* Chart container */
@@ -327,6 +329,33 @@ body{
 
 <script>
 // ---------------------------------------------------------------------------
+// Animated number counter
+// ---------------------------------------------------------------------------
+const _animCounters={};
+function animateValue(elId,newVal,suffix,duration=600){
+  const el=document.getElementById(elId);
+  if(!el)return;
+  const key=elId;
+  if(_animCounters[key])cancelAnimationFrame(_animCounters[key]);
+  const startVal=parseFloat(el.dataset.val)||0;
+  const diff=newVal-startVal;
+  if(Math.abs(diff)<0.05){el.innerHTML=newVal.toFixed(1)+'<span class="metric-unit">'+suffix+'</span>';el.dataset.val=newVal;return;}
+  const startTime=performance.now();
+  function tick(now){
+    const elapsed=now-startTime;
+    const progress=Math.min(elapsed/duration,1);
+    // easeOutCubic
+    const ease=1-Math.pow(1-progress,3);
+    const current=startVal+diff*ease;
+    el.innerHTML=current.toFixed(1)+'<span class="metric-unit">'+suffix+'</span>';
+    if(progress<1){_animCounters[key]=requestAnimationFrame(tick);}
+    else{el.dataset.val=newVal;}
+  }
+  el.dataset.val=newVal;
+  _animCounters[key]=requestAnimationFrame(tick);
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 function fmtBytes(b,dec=1){
@@ -351,11 +380,25 @@ function fmtNum(n){
 }
 
 // ---------------------------------------------------------------------------
-// Charts
+// Charts — smooth animated transitions
 // ---------------------------------------------------------------------------
+
+// Live charts: data slides in from the right, Y values ease smoothly
+const liveAnim={
+  duration:800,
+  easing:'easeInOutCubic',
+  // only animate y values, not x (prevents jitter on label shifts)
+  y:{duration:600,easing:'easeOutCubic'},
+};
+const liveTransition={
+  active:{animation:{duration:200}},
+};
+
 const chartDefaults={
   responsive:true,maintainAspectRatio:false,
-  animation:{duration:400},
+  animation:liveAnim,
+  transitions:liveTransition,
+  interaction:{mode:'index',intersect:false},
   scales:{
     x:{display:false},
     y:{
@@ -364,10 +407,16 @@ const chartDefaults={
       ticks:{color:'#64748b',font:{size:10},callback:v=>fmtRate(v)},
     },
   },
-  plugins:{legend:{display:false},tooltip:{
-    callbacks:{label:ctx=>ctx.dataset.label+': '+fmtRate(ctx.parsed.y)},
-  }},
-  elements:{point:{radius:0},line:{tension:.3,borderWidth:2}},
+  plugins:{
+    legend:{display:false},
+    tooltip:{
+      backgroundColor:'rgba(15,23,42,.9)',borderColor:'rgba(99,102,241,.3)',borderWidth:1,
+      titleColor:'#e2e8f0',bodyColor:'#94a3b8',padding:10,cornerRadius:8,
+      displayColors:true,boxPadding:4,
+      callbacks:{label:ctx=>ctx.dataset.label+': '+fmtRate(ctx.parsed.y)},
+    },
+  },
+  elements:{point:{radius:0,hoverRadius:5,hoverBorderWidth:2},line:{tension:.4,borderWidth:2}},
 };
 
 // Live traffic chart
@@ -377,25 +426,25 @@ const trafficChart=new Chart(trafficCtx,{
   data:{
     labels:[],
     datasets:[
-      {label:'Download (RX)',data:[],borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.08)',fill:true},
-      {label:'Upload (TX)',data:[],borderColor:'#8b5cf6',backgroundColor:'rgba(139,92,246,.08)',fill:true},
+      {label:'Download (RX)',data:[],borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.1)',fill:true,pointBackgroundColor:'#22c55e'},
+      {label:'Upload (TX)',data:[],borderColor:'#8b5cf6',backgroundColor:'rgba(139,92,246,.1)',fill:true,pointBackgroundColor:'#8b5cf6'},
     ]
   },
-  options:{...chartDefaults},
+  options:chartDefaults,
 });
 
 // CPU sparkline
 const cpuCtx=document.getElementById('cpuChart').getContext('2d');
 const cpuChart=new Chart(cpuCtx,{
   type:'line',
-  data:{labels:[],datasets:[{label:'CPU %',data:[],borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.1)',fill:true}]},
+  data:{labels:[],datasets:[{label:'CPU %',data:[],borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.12)',fill:true,pointBackgroundColor:'#6366f1'}]},
   options:{
     ...chartDefaults,
     scales:{
       ...chartDefaults.scales,
       y:{...chartDefaults.scales.y,max:100,ticks:{...chartDefaults.scales.y.ticks,callback:v=>v+'%'}},
     },
-    plugins:{...chartDefaults.plugins,tooltip:{callbacks:{label:ctx=>ctx.parsed.y.toFixed(1)+'%'}}},
+    plugins:{...chartDefaults.plugins,tooltip:{...chartDefaults.plugins.tooltip,callbacks:{label:ctx=>ctx.parsed.y.toFixed(1)+'%'}}},
   },
 });
 
@@ -406,20 +455,26 @@ const vnstatChart=new Chart(vnCtx,{
   data:{
     labels:[],
     datasets:[
-      {label:'Download',data:[],backgroundColor:'rgba(34,197,94,.6)',borderRadius:4},
-      {label:'Upload',data:[],backgroundColor:'rgba(139,92,246,.6)',borderRadius:4},
+      {label:'Download',data:[],backgroundColor:'rgba(34,197,94,.6)',hoverBackgroundColor:'rgba(34,197,94,.85)',borderRadius:6,borderSkipped:false},
+      {label:'Upload',data:[],backgroundColor:'rgba(139,92,246,.6)',hoverBackgroundColor:'rgba(139,92,246,.85)',borderRadius:6,borderSkipped:false},
     ]
   },
   options:{
     responsive:true,maintainAspectRatio:false,
-    animation:{duration:300},
+    animation:{duration:600,easing:'easeOutQuart'},
+    transitions:{active:{animation:{duration:150}}},
+    interaction:{mode:'index',intersect:false},
     scales:{
       x:{grid:{display:false},ticks:{color:'#64748b',font:{size:10},maxRotation:45}},
       y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{color:'#64748b',font:{size:10},callback:v=>fmtBytes(v)}},
     },
     plugins:{
       legend:{display:true,position:'top',labels:{color:'#94a3b8',font:{size:11},boxWidth:12,padding:10}},
-      tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmtBytesPrec(ctx.parsed.y)}},
+      tooltip:{
+        backgroundColor:'rgba(15,23,42,.9)',borderColor:'rgba(99,102,241,.3)',borderWidth:1,
+        titleColor:'#e2e8f0',bodyColor:'#94a3b8',padding:10,cornerRadius:8,
+        callbacks:{label:ctx=>ctx.dataset.label+': '+fmtBytesPrec(ctx.parsed.y)},
+      },
     },
   },
 });
@@ -427,9 +482,11 @@ const vnstatChart=new Chart(vnCtx,{
 // ---------------------------------------------------------------------------
 // History Charts (CPU + Network over time via REST /api/v1/metrics/history)
 // ---------------------------------------------------------------------------
+const histAnim={duration:700,easing:'easeOutCubic'};
 const histTimeOpts={
   responsive:true,maintainAspectRatio:false,
-  animation:{duration:300},
+  animation:histAnim,
+  transitions:{active:{animation:{duration:200}}},
   interaction:{mode:'index',intersect:false},
   scales:{
     x:{
@@ -444,8 +501,12 @@ const histTimeOpts={
   },
   plugins:{
     legend:{display:true,position:'top',labels:{color:'#94a3b8',font:{size:11},boxWidth:12,padding:10}},
+    tooltip:{
+      backgroundColor:'rgba(15,23,42,.9)',borderColor:'rgba(99,102,241,.3)',borderWidth:1,
+      titleColor:'#e2e8f0',bodyColor:'#94a3b8',padding:10,cornerRadius:8,displayColors:true,boxPadding:4,
+    },
   },
-  elements:{point:{radius:1,hoverRadius:4},line:{tension:.3,borderWidth:2}},
+  elements:{point:{radius:1.5,hoverRadius:5,hoverBorderWidth:2},line:{tension:.35,borderWidth:2}},
 };
 
 // CPU History
@@ -453,8 +514,8 @@ const cpuHistCtx=document.getElementById('cpuHistChart').getContext('2d');
 const cpuHistChart=new Chart(cpuHistCtx,{
   type:'line',
   data:{labels:[],datasets:[
-    {label:'CPU %',data:[],borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.1)',fill:true},
-    {label:'Load (1m)',data:[],borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.05)',fill:false,yAxisID:'y1'},
+    {label:'CPU %',data:[],borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.12)',fill:true,pointBackgroundColor:'#6366f1'},
+    {label:'Load (1m)',data:[],borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.05)',fill:false,pointBackgroundColor:'#f59e0b',yAxisID:'y1'},
   ]},
   options:{
     ...histTimeOpts,
@@ -463,7 +524,7 @@ const cpuHistChart=new Chart(cpuHistCtx,{
       y:{...histTimeOpts.scales.y,max:100,ticks:{...histTimeOpts.scales.y.ticks,callback:v=>v+'%'},title:{display:true,text:'CPU %',color:'#64748b',font:{size:10}}},
       y1:{position:'right',beginAtZero:true,grid:{display:false},ticks:{color:'#f59e0b',font:{size:10}},title:{display:true,text:'Load',color:'#f59e0b',font:{size:10}}},
     },
-    plugins:{...histTimeOpts.plugins,tooltip:{callbacks:{
+    plugins:{...histTimeOpts.plugins,tooltip:{...histTimeOpts.plugins.tooltip,callbacks:{
       label:ctx=>ctx.dataset.label+': '+(ctx.datasetIndex===0?ctx.parsed.y.toFixed(1)+'%':ctx.parsed.y.toFixed(2))
     }}},
   },
@@ -474,8 +535,8 @@ const netHistCtx=document.getElementById('netHistChart').getContext('2d');
 const netHistChart=new Chart(netHistCtx,{
   type:'line',
   data:{labels:[],datasets:[
-    {label:'Download (RX)',data:[],borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.08)',fill:true},
-    {label:'Upload (TX)',data:[],borderColor:'#8b5cf6',backgroundColor:'rgba(139,92,246,.08)',fill:true},
+    {label:'Download (RX)',data:[],borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.1)',fill:true,pointBackgroundColor:'#22c55e'},
+    {label:'Upload (TX)',data:[],borderColor:'#8b5cf6',backgroundColor:'rgba(139,92,246,.1)',fill:true,pointBackgroundColor:'#8b5cf6'},
   ]},
   options:{
     ...histTimeOpts,
@@ -483,7 +544,7 @@ const netHistChart=new Chart(netHistCtx,{
       ...histTimeOpts.scales,
       y:{...histTimeOpts.scales.y,ticks:{...histTimeOpts.scales.y.ticks,callback:v=>fmtRate(v)}},
     },
-    plugins:{...histTimeOpts.plugins,tooltip:{callbacks:{
+    plugins:{...histTimeOpts.plugins,tooltip:{...histTimeOpts.plugins.tooltip,callbacks:{
       label:ctx=>ctx.dataset.label+': '+fmtRate(ctx.parsed.y)
     }}},
   },
@@ -529,7 +590,7 @@ function renderCpuHistory(entries){
     cpuHistChart.data.labels=[];
     cpuHistChart.data.datasets[0].data=[];
     cpuHistChart.data.datasets[1].data=[];
-    cpuHistChart.update('none');
+    cpuHistChart.update();
     return;
   }
   const labels=entries.map(e=>fmtHistTime(e.timestamp));
@@ -539,7 +600,7 @@ function renderCpuHistory(entries){
   cpuHistChart.data.labels=labels;
   cpuHistChart.data.datasets[0].data=cpuVals;
   cpuHistChart.data.datasets[1].data=loadVals;
-  cpuHistChart.update('none');
+  cpuHistChart.update();
 
   // Stats
   const valid=cpuVals.filter(v=>v!=null);
@@ -556,7 +617,7 @@ function renderNetHistory(entries){
     netHistChart.data.labels=[];
     netHistChart.data.datasets[0].data=[];
     netHistChart.data.datasets[1].data=[];
-    netHistChart.update('none');
+    netHistChart.update();
     return;
   }
   const labels=entries.map(e=>fmtHistTime(e.timestamp));
@@ -572,7 +633,7 @@ function renderNetHistory(entries){
   netHistChart.data.labels=labels;
   netHistChart.data.datasets[0].data=rxVals;
   netHistChart.data.datasets[1].data=txVals;
-  netHistChart.update('none');
+  netHistChart.update();
 
   // Stats
   const validRx=rxVals.filter(v=>v>0),validTx=txVals.filter(v=>v>0);
@@ -645,7 +706,7 @@ function renderVnstat(vn){
   vnstatChart.data.labels=labels;
   vnstatChart.data.datasets[0].data=series.map(s=>s.rx);
   vnstatChart.data.datasets[1].data=series.map(s=>s.tx);
-  vnstatChart.update('none');
+  vnstatChart.update();
 }
 
 // ---------------------------------------------------------------------------
@@ -668,7 +729,7 @@ function update(d){
   // CPU
   if(m.cpu){
     const c=m.cpu;
-    document.getElementById('cpuOverall').innerHTML=c.overall.toFixed(1)+'<span class="metric-unit">%</span>';
+    animateValue('cpuOverall',c.overall,'%');
     document.getElementById('cpuCores').textContent=c.core_count+' cores';
     const freq=c.frequency_mhz?Math.round(c.frequency_mhz)+' MHz':'';
     const temp=Object.values(c.temperatures||{})[0];
@@ -747,11 +808,11 @@ function update(d){
     trafficChart.data.labels=labels;
     trafficChart.data.datasets[0].data=lh.net_rx;
     trafficChart.data.datasets[1].data=lh.net_tx;
-    trafficChart.update('none');
+    trafficChart.update();
 
     cpuChart.data.labels=labels;
     cpuChart.data.datasets[0].data=lh.cpu;
-    cpuChart.update('none');
+    cpuChart.update();
   }
 
   // vnstat
