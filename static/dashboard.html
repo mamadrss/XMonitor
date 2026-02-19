@@ -154,7 +154,15 @@ body{
 
 /* Chart container */
 .chart-wrap{position:relative;width:100%;height:220px}
+.chart-wrap-md{position:relative;width:100%;height:260px}
 .chart-wrap-sm{height:160px}
+
+/* History chart header */
+.history-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.history-title{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);display:flex;align-items:center;gap:.5rem}
+.history-stats{display:flex;gap:1rem;font-size:.75rem;color:var(--text-dim)}
+.history-stats span{display:flex;align-items:center;gap:.3rem}
+.history-stats .hs-val{color:var(--text);font-weight:600}
 
 /* Responsive */
 @media(max-width:768px){
@@ -214,6 +222,46 @@ body{
       <div class="stat-item"><div class="val" id="vnTotal">—</div><div class="lbl">All Time</div></div>
     </div>
     <div class="chart-wrap"><canvas id="vnstatChart"></canvas></div>
+  </div>
+
+  <!-- CPU History Chart -->
+  <div class="card full-width">
+    <div class="history-header">
+      <div class="history-title">
+        CPU Usage Over Time
+        <div class="history-stats">
+          <span>Avg: <span class="hs-val" id="cpuHistAvg">—</span></span>
+          <span>Max: <span class="hs-val" id="cpuHistMax">—</span></span>
+          <span>Min: <span class="hs-val" id="cpuHistMin">—</span></span>
+        </div>
+      </div>
+      <div class="toggle-group">
+        <button class="toggle-btn active" onclick="setCpuHistPeriod(60,this)">1H</button>
+        <button class="toggle-btn" onclick="setCpuHistPeriod(360,this)">6H</button>
+        <button class="toggle-btn" onclick="setCpuHistPeriod(1440,this)">24H</button>
+      </div>
+    </div>
+    <div class="chart-wrap-md"><canvas id="cpuHistChart"></canvas></div>
+  </div>
+
+  <!-- Network Traffic History Chart -->
+  <div class="card full-width">
+    <div class="history-header">
+      <div class="history-title">
+        Network Traffic Over Time
+        <div class="history-stats">
+          <span>Avg RX: <span class="hs-val" id="netHistAvgRx">—</span></span>
+          <span>Avg TX: <span class="hs-val" id="netHistAvgTx">—</span></span>
+          <span>Peak: <span class="hs-val" id="netHistPeak">—</span></span>
+        </div>
+      </div>
+      <div class="toggle-group">
+        <button class="toggle-btn active" onclick="setNetHistPeriod(60,this)">1H</button>
+        <button class="toggle-btn" onclick="setNetHistPeriod(360,this)">6H</button>
+        <button class="toggle-btn" onclick="setNetHistPeriod(1440,this)">24H</button>
+      </div>
+    </div>
+    <div class="chart-wrap-md"><canvas id="netHistChart"></canvas></div>
   </div>
 
   <!-- CPU -->
@@ -375,6 +423,172 @@ const vnstatChart=new Chart(vnCtx,{
     },
   },
 });
+
+// ---------------------------------------------------------------------------
+// History Charts (CPU + Network over time via REST /api/v1/metrics/history)
+// ---------------------------------------------------------------------------
+const histTimeOpts={
+  responsive:true,maintainAspectRatio:false,
+  animation:{duration:300},
+  interaction:{mode:'index',intersect:false},
+  scales:{
+    x:{
+      grid:{color:'rgba(255,255,255,.03)'},
+      ticks:{color:'#64748b',font:{size:10},maxTicksLimit:12,maxRotation:0},
+    },
+    y:{
+      beginAtZero:true,
+      grid:{color:'rgba(255,255,255,.04)'},
+      ticks:{color:'#64748b',font:{size:10}},
+    },
+  },
+  plugins:{
+    legend:{display:true,position:'top',labels:{color:'#94a3b8',font:{size:11},boxWidth:12,padding:10}},
+  },
+  elements:{point:{radius:1,hoverRadius:4},line:{tension:.3,borderWidth:2}},
+};
+
+// CPU History
+const cpuHistCtx=document.getElementById('cpuHistChart').getContext('2d');
+const cpuHistChart=new Chart(cpuHistCtx,{
+  type:'line',
+  data:{labels:[],datasets:[
+    {label:'CPU %',data:[],borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.1)',fill:true},
+    {label:'Load (1m)',data:[],borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.05)',fill:false,yAxisID:'y1'},
+  ]},
+  options:{
+    ...histTimeOpts,
+    scales:{
+      ...histTimeOpts.scales,
+      y:{...histTimeOpts.scales.y,max:100,ticks:{...histTimeOpts.scales.y.ticks,callback:v=>v+'%'},title:{display:true,text:'CPU %',color:'#64748b',font:{size:10}}},
+      y1:{position:'right',beginAtZero:true,grid:{display:false},ticks:{color:'#f59e0b',font:{size:10}},title:{display:true,text:'Load',color:'#f59e0b',font:{size:10}}},
+    },
+    plugins:{...histTimeOpts.plugins,tooltip:{callbacks:{
+      label:ctx=>ctx.dataset.label+': '+(ctx.datasetIndex===0?ctx.parsed.y.toFixed(1)+'%':ctx.parsed.y.toFixed(2))
+    }}},
+  },
+});
+
+// Network History
+const netHistCtx=document.getElementById('netHistChart').getContext('2d');
+const netHistChart=new Chart(netHistCtx,{
+  type:'line',
+  data:{labels:[],datasets:[
+    {label:'Download (RX)',data:[],borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.08)',fill:true},
+    {label:'Upload (TX)',data:[],borderColor:'#8b5cf6',backgroundColor:'rgba(139,92,246,.08)',fill:true},
+  ]},
+  options:{
+    ...histTimeOpts,
+    scales:{
+      ...histTimeOpts.scales,
+      y:{...histTimeOpts.scales.y,ticks:{...histTimeOpts.scales.y.ticks,callback:v=>fmtRate(v)}},
+    },
+    plugins:{...histTimeOpts.plugins,tooltip:{callbacks:{
+      label:ctx=>ctx.dataset.label+': '+fmtRate(ctx.parsed.y)
+    }}},
+  },
+});
+
+let cpuHistPeriod=60;
+let netHistPeriod=60;
+let historyCache={};
+
+function setCpuHistPeriod(min,btn){
+  cpuHistPeriod=min;
+  btn.parentElement.querySelectorAll('.toggle-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  fetchHistory('cpu',min);
+}
+function setNetHistPeriod(min,btn){
+  netHistPeriod=min;
+  btn.parentElement.querySelectorAll('.toggle-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  fetchHistory('net',min);
+}
+
+function fmtHistTime(ts){
+  const d=new Date(ts*1000);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+
+async function fetchHistory(type,minutes){
+  const key=type+'_'+minutes;
+  try{
+    const res=await fetch('/api/v1/metrics/history?minutes='+minutes);
+    if(!res.ok)return;
+    const json=await res.json();
+    const entries=json.data||[];
+    historyCache[key]=entries;
+    if(type==='cpu')renderCpuHistory(entries);
+    else renderNetHistory(entries);
+  }catch(e){console.warn('[XMonitor] History fetch error:',e)}
+}
+
+function renderCpuHistory(entries){
+  if(!entries.length){
+    cpuHistChart.data.labels=[];
+    cpuHistChart.data.datasets[0].data=[];
+    cpuHistChart.data.datasets[1].data=[];
+    cpuHistChart.update('none');
+    return;
+  }
+  const labels=entries.map(e=>fmtHistTime(e.timestamp));
+  const cpuVals=entries.map(e=>(e.data&&e.data.cpu)?e.data.cpu.overall:null);
+  const loadVals=entries.map(e=>(e.data&&e.data.cpu&&e.data.cpu.load_average)?e.data.cpu.load_average[0]:null);
+
+  cpuHistChart.data.labels=labels;
+  cpuHistChart.data.datasets[0].data=cpuVals;
+  cpuHistChart.data.datasets[1].data=loadVals;
+  cpuHistChart.update('none');
+
+  // Stats
+  const valid=cpuVals.filter(v=>v!=null);
+  if(valid.length){
+    const avg=(valid.reduce((a,b)=>a+b,0)/valid.length);
+    document.getElementById('cpuHistAvg').textContent=avg.toFixed(1)+'%';
+    document.getElementById('cpuHistMax').textContent=Math.max(...valid).toFixed(1)+'%';
+    document.getElementById('cpuHistMin').textContent=Math.min(...valid).toFixed(1)+'%';
+  }
+}
+
+function renderNetHistory(entries){
+  if(!entries.length){
+    netHistChart.data.labels=[];
+    netHistChart.data.datasets[0].data=[];
+    netHistChart.data.datasets[1].data=[];
+    netHistChart.update('none');
+    return;
+  }
+  const labels=entries.map(e=>fmtHistTime(e.timestamp));
+  const rxVals=entries.map(e=>{
+    if(!e.data||!e.data.network)return 0;
+    return Object.values(e.data.network).reduce((s,n)=>s+(n.rx_bytes_sec||0),0);
+  });
+  const txVals=entries.map(e=>{
+    if(!e.data||!e.data.network)return 0;
+    return Object.values(e.data.network).reduce((s,n)=>s+(n.tx_bytes_sec||0),0);
+  });
+
+  netHistChart.data.labels=labels;
+  netHistChart.data.datasets[0].data=rxVals;
+  netHistChart.data.datasets[1].data=txVals;
+  netHistChart.update('none');
+
+  // Stats
+  const validRx=rxVals.filter(v=>v>0),validTx=txVals.filter(v=>v>0);
+  const avgRx=validRx.length?(validRx.reduce((a,b)=>a+b,0)/validRx.length):0;
+  const avgTx=validTx.length?(validTx.reduce((a,b)=>a+b,0)/validTx.length):0;
+  const peak=Math.max(...rxVals,...txVals);
+  document.getElementById('netHistAvgRx').textContent=fmtRate(avgRx);
+  document.getElementById('netHistAvgTx').textContent=fmtRate(avgTx);
+  document.getElementById('netHistPeak').textContent=fmtRate(peak);
+}
+
+// Refresh history periodically (every 60s)
+setInterval(()=>{
+  fetchHistory('cpu',cpuHistPeriod);
+  fetchHistory('net',netHistPeriod);
+},60000);
 
 let currentVnView='hourly';
 let latestVnstat=null;
@@ -545,11 +759,19 @@ function update(d){
 }
 
 // ---------------------------------------------------------------------------
-// REST API fallback polling
+// Live data engine: REST polling is the reliable backbone.
+// WebSocket is an accelerator — if it delivers data, REST pauses.
+// If WS goes silent, REST auto-resumes.
 // ---------------------------------------------------------------------------
+const POLL_INTERVAL=2000;       // REST poll every 2s
+const WS_DATA_TIMEOUT=6000;     // if no WS data for 6s, resume REST
 let pollTimer=null;
-let wsConnected=false;
+let wsLive=false;               // true only while WS is actively delivering data
+let lastWsData=0;               // timestamp of last WS metrics message
+let wsSilenceTimer=null;        // detects WS going silent
+const statusEl=document.getElementById('connStatus');
 
+// --- REST polling ---
 async function fetchMetrics(){
   try{
     const res=await fetch('/api/v1/metrics/current');
@@ -562,80 +784,81 @@ async function fetchMetrics(){
 
 function startPolling(){
   if(pollTimer)return;
-  console.log('[XMonitor] Starting REST fallback polling');
-  pollTimer=setInterval(fetchMetrics,3000);
+  console.log('[XMonitor] REST polling active');
+  pollTimer=setInterval(fetchMetrics,POLL_INTERVAL);
 }
 function stopPolling(){
-  if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+  if(pollTimer){clearInterval(pollTimer);pollTimer=null;console.log('[XMonitor] REST polling paused (WS active)');}
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket
-// ---------------------------------------------------------------------------
+// --- WebSocket ---
 let ws=null;
 let reconnectDelay=1000;
-let wsFailCount=0;
-const statusEl=document.getElementById('connStatus');
 
 function connectWS(){
-  const proto=location.protocol==='https:'?'wss:':'ws:';
-  ws=new WebSocket(proto+'//'+location.host+'/ws/metrics');
+  try{
+    const proto=location.protocol==='https:'?'wss:':'ws:';
+    ws=new WebSocket(proto+'//'+location.host+'/ws/metrics');
+  }catch(e){return;}
 
   ws.onopen=()=>{
     console.log('[XMonitor] WebSocket connected');
-    // Cookies should be sent automatically, but just in case,
-    // we don't need to send a separate auth message for cookie-based auth.
-    // The server will check cookies first, then wait for a message.
+    reconnectDelay=1000;
   };
 
   ws.onmessage=e=>{
     try{
       const parsed=JSON.parse(e.data);
-      if(parsed.type==='auth_ok'){
-        console.log('[XMonitor] WebSocket authenticated');
+      if(parsed.type==='auth_ok'){console.log('[XMonitor] WS authenticated');return;}
+      if(parsed.type==='pong')return;
+
+      // We got real metrics data from WS
+      lastWsData=Date.now();
+      if(!wsLive){
+        wsLive=true;
         statusEl.className='conn-status ok';
         statusEl.title='Connected (WebSocket)';
-        reconnectDelay=1000;
-        wsFailCount=0;
-        wsConnected=true;
         stopPolling();
-        return;
+        startWsSilenceWatch();
       }
-      if(parsed.type==='pong')return;
       update(parsed);
-    }catch(err){console.error('[XMonitor] WS message parse error:',err)}
+    }catch(err){console.error('[XMonitor] WS parse error:',err)}
   };
 
-  ws.onclose=(ev)=>{
-    console.warn('[XMonitor] WebSocket closed, code:',ev.code,'reason:',ev.reason);
-    wsConnected=false;
+  ws.onclose=()=>{
+    wsLive=false;
     statusEl.className='conn-status err';
-    statusEl.title='Disconnected';
-    wsFailCount++;
-
-    // If WebSocket keeps failing, fall back to REST polling
-    if(wsFailCount>=3){
-      console.warn('[XMonitor] WebSocket failed 3+ times, using REST polling');
-      startPolling();
-    }
-
+    statusEl.title='Polling (REST)';
+    startPolling();
     setTimeout(connectWS,reconnectDelay);
     reconnectDelay=Math.min(reconnectDelay*1.5,15000);
   };
 
-  ws.onerror=(e)=>{console.error('[XMonitor] WebSocket error:',e);ws.close()};
+  ws.onerror=()=>{try{ws.close()}catch(e){}};
 }
 
-// Keepalive ping
-setInterval(()=>{if(ws&&ws.readyState===1)ws.send('ping')},30000);
+// If WS authenticated but stops delivering data, resume REST
+function startWsSilenceWatch(){
+  if(wsSilenceTimer)clearInterval(wsSilenceTimer);
+  wsSilenceTimer=setInterval(()=>{
+    if(Date.now()-lastWsData>WS_DATA_TIMEOUT){
+      console.warn('[XMonitor] WS silent for '+WS_DATA_TIMEOUT+'ms, resuming REST');
+      wsLive=false;
+      statusEl.className='conn-status ok';
+      statusEl.title='Polling (REST)';
+      startPolling();
+    }
+  },WS_DATA_TIMEOUT);
+}
+
+// Keepalive
+setInterval(()=>{if(ws&&ws.readyState===1)try{ws.send('ping')}catch(e){}},30000);
 
 // Token refresh
 async function refreshToken(){
   try{
     const res=await fetch('/api/v1/auth/refresh',{method:'POST'});
     if(!res.ok){window.location.href='/login';return;}
-    // Reconnect WS to pick up new cookie
-    if(ws&&ws.readyState===1){ws.close();setTimeout(connectWS,500);}
   }catch(e){}
 }
 setInterval(refreshToken,12*60*1000);
@@ -645,8 +868,13 @@ async function logout(){
   window.location.href='/login';
 }
 
-// Start: fetch initial data immediately via REST, then connect WS
+// ---------------------------------------------------------------------------
+// Boot: start REST polling immediately, then try WS as accelerator
+// ---------------------------------------------------------------------------
 fetchMetrics();
+startPolling();
+fetchHistory('cpu',cpuHistPeriod);
+fetchHistory('net',netHistPeriod);
 connectWS();
 </script>
 </body>
