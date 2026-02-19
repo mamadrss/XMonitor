@@ -545,10 +545,36 @@ function update(d){
 }
 
 // ---------------------------------------------------------------------------
+// REST API fallback polling
+// ---------------------------------------------------------------------------
+let pollTimer=null;
+let wsConnected=false;
+
+async function fetchMetrics(){
+  try{
+    const res=await fetch('/api/v1/metrics/current');
+    if(res.status===401){window.location.href='/login';return;}
+    if(!res.ok)return;
+    const data=await res.json();
+    update(data);
+  }catch(e){console.warn('[XMonitor] REST poll error:',e)}
+}
+
+function startPolling(){
+  if(pollTimer)return;
+  console.log('[XMonitor] Starting REST fallback polling');
+  pollTimer=setInterval(fetchMetrics,3000);
+}
+function stopPolling(){
+  if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket
 // ---------------------------------------------------------------------------
 let ws=null;
 let reconnectDelay=1000;
+let wsFailCount=0;
 const statusEl=document.getElementById('connStatus');
 
 function connectWS(){
@@ -556,40 +582,71 @@ function connectWS(){
   ws=new WebSocket(proto+'//'+location.host+'/ws/metrics');
 
   ws.onopen=()=>{
-    statusEl.className='conn-status ok';
-    statusEl.title='Connected';
-    reconnectDelay=1000;
+    console.log('[XMonitor] WebSocket connected');
+    // Cookies should be sent automatically, but just in case,
+    // we don't need to send a separate auth message for cookie-based auth.
+    // The server will check cookies first, then wait for a message.
   };
 
   ws.onmessage=e=>{
-    try{update(JSON.parse(e.data))}catch(err){console.error(err)}
+    try{
+      const parsed=JSON.parse(e.data);
+      if(parsed.type==='auth_ok'){
+        console.log('[XMonitor] WebSocket authenticated');
+        statusEl.className='conn-status ok';
+        statusEl.title='Connected (WebSocket)';
+        reconnectDelay=1000;
+        wsFailCount=0;
+        wsConnected=true;
+        stopPolling();
+        return;
+      }
+      if(parsed.type==='pong')return;
+      update(parsed);
+    }catch(err){console.error('[XMonitor] WS message parse error:',err)}
   };
 
-  ws.onclose=()=>{
+  ws.onclose=(ev)=>{
+    console.warn('[XMonitor] WebSocket closed, code:',ev.code,'reason:',ev.reason);
+    wsConnected=false;
     statusEl.className='conn-status err';
     statusEl.title='Disconnected';
+    wsFailCount++;
+
+    // If WebSocket keeps failing, fall back to REST polling
+    if(wsFailCount>=3){
+      console.warn('[XMonitor] WebSocket failed 3+ times, using REST polling');
+      startPolling();
+    }
+
     setTimeout(connectWS,reconnectDelay);
     reconnectDelay=Math.min(reconnectDelay*1.5,15000);
   };
 
-  ws.onerror=()=>ws.close();
+  ws.onerror=(e)=>{console.error('[XMonitor] WebSocket error:',e);ws.close()};
 }
+
+// Keepalive ping
+setInterval(()=>{if(ws&&ws.readyState===1)ws.send('ping')},30000);
 
 // Token refresh
 async function refreshToken(){
   try{
     const res=await fetch('/api/v1/auth/refresh',{method:'POST'});
-    if(!res.ok)window.location.href='/login';
+    if(!res.ok){window.location.href='/login';return;}
+    // Reconnect WS to pick up new cookie
+    if(ws&&ws.readyState===1){ws.close();setTimeout(connectWS,500);}
   }catch(e){}
 }
-setInterval(refreshToken,12*60*1000); // every 12 min
+setInterval(refreshToken,12*60*1000);
 
 async function logout(){
   await fetch('/api/v1/auth/logout',{method:'POST'});
   window.location.href='/login';
 }
 
-// Start
+// Start: fetch initial data immediately via REST, then connect WS
+fetchMetrics();
 connectWS();
 </script>
 </body>

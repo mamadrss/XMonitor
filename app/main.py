@@ -58,14 +58,14 @@ async def _live_broadcast():
             payload = json.dumps(envelope, default=str)
 
             dead = set()
-            for ws in _ws_clients:
+            for ws in _ws_clients.copy():
                 try:
                     await ws.send_text(payload)
                 except Exception:
                     dead.add(ws)
             _ws_clients -= dead
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[XMonitor] Broadcast error: {e}")
         await asyncio.sleep(interval)
 
 
@@ -87,8 +87,8 @@ async def _history_collector():
             max_entries = int(retention * 24 * 60)  # 1 per minute
             while len(_history) > max_entries:
                 _history.pop(0)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[XMonitor] History collection error: {e}")
         await asyncio.sleep(interval)
 
 
@@ -150,11 +150,11 @@ async def login(request: Request, response: Response):
     response = JSONResponse(content=_envelope({"message": "Login successful"}))
     response.set_cookie(
         "access_token", access,
-        httponly=True, samesite="strict", max_age=900, path="/",
+        httponly=True, samesite="lax", max_age=900, path="/",
     )
     response.set_cookie(
         "refresh_token", refresh,
-        httponly=True, samesite="strict", max_age=604800, path="/api/v1/auth/refresh",
+        httponly=True, samesite="lax", max_age=604800, path="/",
     )
     return response
 
@@ -173,7 +173,7 @@ async def refresh(request: Request):
     response = JSONResponse(content=_envelope({"message": "Token refreshed"}))
     response.set_cookie(
         "access_token", access,
-        httponly=True, samesite="strict", max_age=900, path="/",
+        httponly=True, samesite="lax", max_age=900, path="/",
     )
     return response
 
@@ -182,7 +182,7 @@ async def refresh(request: Request):
 async def logout():
     response = JSONResponse(content=_envelope({"message": "Logged out"}))
     response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/api/v1/auth/refresh")
+    response.delete_cookie("refresh_token", path="/")
     return response
 
 
@@ -232,11 +232,26 @@ async def register(request: Request):
 # ---------------------------------------------------------------------------
 @app.websocket("/ws/metrics")
 async def ws_metrics(ws: WebSocket):
-    # Authenticate via cookie
-    token = ws.cookies.get("access_token")
+    # Try cookie first, then query param
+    token = ws.cookies.get("access_token") or ws.query_params.get("token")
+
+    # Accept connection first (required for proper close handshake)
+    await ws.accept()
+
+    if not token:
+        # Wait for auth message from client as last resort
+        try:
+            msg = await asyncio.wait_for(ws.receive_text(), timeout=5)
+            data = json.loads(msg)
+            token = data.get("token")
+        except Exception:
+            await ws.close(code=4001, reason="Not authenticated")
+            return
+
     if not token:
         await ws.close(code=4001, reason="Not authenticated")
         return
+
     try:
         payload = decode_token(token)
         if payload.get("type") != "access":
@@ -246,11 +261,12 @@ async def ws_metrics(ws: WebSocket):
         await ws.close(code=4001, reason="Invalid token")
         return
 
-    await ws.accept()
+    # Send confirmation so client knows auth succeeded
+    await ws.send_text('{"type":"auth_ok"}')
+
     _ws_clients.add(ws)
     try:
         while True:
-            # Keep connection alive; client can send pings
             data = await ws.receive_text()
             if data == "ping":
                 await ws.send_text('{"type":"pong"}')

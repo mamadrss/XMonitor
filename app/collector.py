@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import os
+import platform
 import shutil
 import socket
 import time
@@ -86,8 +88,8 @@ def collect_memory() -> dict:
         "used": vm.used,
         "free": vm.free,
         "available": vm.available,
-        "cached": vm.cached,
-        "buffers": vm.buffers,
+        "cached": getattr(vm, "cached", 0),
+        "buffers": getattr(vm, "buffers", 0),
         "percent": vm.percent,
         "swap_total": sw.total,
         "swap_used": sw.used,
@@ -116,7 +118,10 @@ def collect_disk() -> dict:
             continue
 
     # I/O rates
-    io = psutil.disk_io_counters(perdisk=False)
+    try:
+        io = psutil.disk_io_counters(perdisk=False)
+    except Exception:
+        io = None
     now = time.time()
     io_rates = {}
     if io and _prev_disk is not None:
@@ -316,31 +321,61 @@ def collect_system_info() -> dict:
     except OSError:
         pass
 
+    uname = platform.uname()
     return {
         "hostname": hostname,
         "ip": ip,
         "uptime_seconds": uptime,
         "boot_time": boot,
         "process_count": len(psutil.pids()),
-        "platform": f"{psutil.os.uname().sysname} {psutil.os.uname().release}",
+        "platform": f"{uname.system} {uname.release}",
     }
 
 
 async def collect_all() -> dict:
-    """Full metrics snapshot."""
-    cpu = collect_cpu()
-    mem = collect_memory()
-    disk = collect_disk()
-    net = collect_network_psutil()
-    vnstat = await collect_vnstat()
-    info = collect_system_info()
+    """Full metrics snapshot. Each collector fails independently."""
+    cpu = {}
+    mem = {}
+    disk = {}
+    net = {}
+    vnstat_data = {"available": False}
+    info = {}
+
+    try:
+        cpu = collect_cpu()
+    except Exception as e:
+        print(f"[XMonitor] CPU collection error: {e}")
+
+    try:
+        mem = collect_memory()
+    except Exception as e:
+        print(f"[XMonitor] Memory collection error: {e}")
+
+    try:
+        disk = collect_disk()
+    except Exception as e:
+        print(f"[XMonitor] Disk collection error: {e}")
+
+    try:
+        net = collect_network_psutil()
+    except Exception as e:
+        print(f"[XMonitor] Network collection error: {e}")
+
+    try:
+        vnstat_data = await collect_vnstat()
+    except Exception as e:
+        print(f"[XMonitor] vnstat collection error: {e}")
+
+    try:
+        info = collect_system_info()
+    except Exception as e:
+        print(f"[XMonitor] System info error: {e}")
 
     # Update live histories
     now = time.time()
-    _cpu_history.append(cpu["overall"])
+    _cpu_history.append(cpu.get("overall", 0))
     _timestamps.append(now)
 
-    # Sum rx/tx across all monitored interfaces
     total_rx = sum(v.get("rx_bytes_sec", 0) for v in net.values())
     total_tx = sum(v.get("tx_bytes_sec", 0) for v in net.values())
     _net_rx_history.append(total_rx)
@@ -352,7 +387,7 @@ async def collect_all() -> dict:
         "memory": mem,
         "disk": disk,
         "network": net,
-        "vnstat": vnstat,
+        "vnstat": vnstat_data,
         "live_history": {
             "timestamps": list(_timestamps),
             "cpu": list(_cpu_history),
