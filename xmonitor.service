@@ -1,0 +1,25 @@
+[Unit]
+Description=XMonitor - Server Monitoring Dashboard
+After=network.target vnstat.service
+Wants=vnstat.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/xmonitor
+Environment=XMONITOR_CONFIG=/opt/xmonitor/config.yaml
+ExecStart=/opt/xmonitor/venv/bin/python run.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=strict
+ReadWritePaths=/opt/xmonitor
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

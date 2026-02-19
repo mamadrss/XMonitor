@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>XMonitor Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0e17;--bg2:#0f172a;--card:rgba(15,23,42,.65);
+  --border:rgba(99,102,241,.15);--accent:#6366f1;--accent2:#8b5cf6;
+  --accent-glow:rgba(99,102,241,.25);--text:#e2e8f0;--text-dim:#94a3b8;
+  --text-muted:#64748b;--green:#22c55e;--red:#ef4444;--orange:#f59e0b;
+  --cyan:#06b6d4;--pink:#ec4899;--radius:12px;
+}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);overflow-x:hidden;
+  background-image:radial-gradient(ellipse at 30% 0%,rgba(99,102,241,.06) 0%,transparent 50%),
+                    radial-gradient(ellipse at 70% 100%,rgba(139,92,246,.04) 0%,transparent 50%);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--accent);border-radius:3px}
+
+/* Header */
+.header{
+  background:var(--card);border-bottom:1px solid var(--border);
+  backdrop-filter:blur(20px);padding:.75rem 1.5rem;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:100;
+}
+.header-left{display:flex;align-items:center;gap:1.25rem}
+.brand{font-size:1.2rem;font-weight:700;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.server-info{display:flex;gap:1rem;font-size:.8rem;color:var(--text-dim)}
+.server-info span{display:flex;align-items:center;gap:.3rem}
+.header-right{display:flex;align-items:center;gap:1rem}
+.conn-status{
+  width:8px;height:8px;border-radius:50%;
+  box-shadow:0 0 6px currentColor;
+}
+.conn-status.ok{color:var(--green);background:var(--green)}
+.conn-status.err{color:var(--red);background:var(--red)}
+.btn-sm{
+  padding:.4rem .8rem;font-size:.75rem;border:1px solid var(--border);
+  border-radius:6px;background:transparent;color:var(--text-dim);cursor:pointer;
+  transition:all .2s;
+}
+.btn-sm:hover{border-color:var(--accent);color:var(--text)}
+
+/* Grid */
+.dashboard{
+  max-width:1400px;margin:0 auto;padding:1rem;
+  display:grid;gap:1rem;
+  grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+}
+.full-width{grid-column:1/-1}
+.half-width{grid-column:span 1}
+
+/* Cards */
+.card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:1.25rem;backdrop-filter:blur(20px);
+  box-shadow:0 4px 24px rgba(0,0,0,.15),inset 0 1px 0 rgba(255,255,255,.03);
+  transition:border-color .3s;
+}
+.card:hover{border-color:rgba(99,102,241,.3)}
+.card-title{
+  font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--text-dim);margin-bottom:1rem;display:flex;
+  align-items:center;justify-content:space-between;
+}
+.card-title .badge{
+  font-size:.65rem;padding:.15rem .5rem;border-radius:4px;
+  background:rgba(99,102,241,.15);color:var(--accent);
+  text-transform:none;letter-spacing:0;
+}
+
+/* Metric value */
+.metric{font-size:2rem;font-weight:700;line-height:1.1}
+.metric-sm{font-size:1.25rem}
+.metric-unit{font-size:.7em;color:var(--text-dim);font-weight:400}
+.metric-sub{font-size:.8rem;color:var(--text-dim);margin-top:.25rem}
+
+/* Progress bars */
+.progress-wrap{margin:.5rem 0}
+.progress-label{
+  display:flex;justify-content:space-between;font-size:.75rem;
+  color:var(--text-dim);margin-bottom:.3rem;
+}
+.progress-bar{
+  height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;
+}
+.progress-fill{
+  height:100%;border-radius:3px;transition:width .6s ease;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.progress-fill.warn{background:linear-gradient(90deg,var(--orange),var(--red))}
+.progress-fill.ok{background:linear-gradient(90deg,var(--green),var(--cyan))}
+
+/* Stats grid */
+.stats-row{display:flex;gap:.75rem;flex-wrap:wrap}
+.stat-item{
+  flex:1;min-width:80px;padding:.6rem;
+  background:rgba(255,255,255,.03);border-radius:8px;text-align:center;
+}
+.stat-item .val{font-size:1.1rem;font-weight:600}
+.stat-item .lbl{font-size:.65rem;color:var(--text-dim);margin-top:.15rem}
+
+/* Disk table */
+.disk-table{width:100%;font-size:.8rem;border-collapse:collapse}
+.disk-table th{
+  text-align:left;color:var(--text-dim);font-weight:500;
+  padding:.4rem .5rem;border-bottom:1px solid var(--border);
+}
+.disk-table td{padding:.5rem;border-bottom:1px solid rgba(255,255,255,.03)}
+
+/* Toggle group */
+.toggle-group{display:flex;gap:2px;background:rgba(255,255,255,.05);border-radius:6px;padding:2px}
+.toggle-btn{
+  padding:.3rem .7rem;font-size:.7rem;border:none;border-radius:4px;
+  background:transparent;color:var(--text-dim);cursor:pointer;transition:all .2s;
+}
+.toggle-btn.active{background:var(--accent);color:#fff}
+
+/* Interface cards */
+.nic-grid{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.nic-card{
+  padding:.75rem;background:rgba(255,255,255,.03);border-radius:8px;
+  border:1px solid rgba(255,255,255,.04);
+}
+.nic-name{font-weight:600;font-size:.85rem;margin-bottom:.5rem;color:var(--cyan)}
+.nic-row{display:flex;justify-content:space-between;font-size:.75rem;padding:.15rem 0}
+.rx-color{color:var(--green)}
+.tx-color{color:var(--accent2)}
+
+/* Quick stats bar */
+.quick-stats{
+  display:flex;gap:.75rem;flex-wrap:wrap;
+}
+.qs-item{
+  flex:1;min-width:120px;display:flex;align-items:center;gap:.5rem;
+  padding:.5rem .75rem;background:rgba(255,255,255,.03);border-radius:8px;
+}
+.qs-icon{font-size:1rem;width:24px;text-align:center}
+.qs-text .qs-val{font-size:.85rem;font-weight:600}
+.qs-text .qs-lbl{font-size:.65rem;color:var(--text-dim)}
+
+/* Chart container */
+.chart-wrap{position:relative;width:100%;height:220px}
+.chart-wrap-sm{height:160px}
+
+/* Responsive */
+@media(max-width:768px){
+  .header{flex-direction:column;gap:.5rem;padding:.5rem 1rem}
+  .server-info{flex-wrap:wrap;gap:.5rem}
+  .dashboard{grid-template-columns:1fr;padding:.5rem}
+  .chart-wrap{height:180px}
+  .metric{font-size:1.5rem}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <span class="brand">XMonitor</span>
+    <div class="server-info">
+      <span id="hHostname">—</span>
+      <span id="hIP">—</span>
+      <span id="hUptime">—</span>
+      <span id="hTime">—</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="conn-status err" id="connStatus" title="Disconnected"></div>
+    <button class="btn-sm" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div class="dashboard">
+
+  <!-- Live Traffic Graph -->
+  <div class="card full-width">
+    <div class="card-title">
+      Live Network Traffic
+      <span class="badge" id="trafficRate">— / —</span>
+    </div>
+    <div class="chart-wrap"><canvas id="trafficChart"></canvas></div>
+  </div>
+
+  <!-- vnstat Bandwidth Panel -->
+  <div class="card full-width">
+    <div class="card-title">
+      Bandwidth Usage (vnstat)
+      <div class="toggle-group">
+        <button class="toggle-btn active" data-view="hourly" onclick="setVnstatView('hourly',this)">Hourly</button>
+        <button class="toggle-btn" data-view="daily" onclick="setVnstatView('daily',this)">Daily</button>
+        <button class="toggle-btn" data-view="monthly" onclick="setVnstatView('monthly',this)">Monthly</button>
+      </div>
+    </div>
+    <div class="stats-row" style="margin-bottom:1rem">
+      <div class="stat-item"><div class="val" id="vnHour">—</div><div class="lbl">This Hour</div></div>
+      <div class="stat-item"><div class="val" id="vnDay">—</div><div class="lbl">Today</div></div>
+      <div class="stat-item"><div class="val" id="vnMonth">—</div><div class="lbl">This Month</div></div>
+      <div class="stat-item"><div class="val" id="vnTotal">—</div><div class="lbl">All Time</div></div>
+    </div>
+    <div class="chart-wrap"><canvas id="vnstatChart"></canvas></div>
+  </div>
+
+  <!-- CPU -->
+  <div class="card">
+    <div class="card-title">CPU<span class="badge" id="cpuCores">—</span></div>
+    <div class="metric" id="cpuOverall">—<span class="metric-unit">%</span></div>
+    <div class="metric-sub" id="cpuFreq">—</div>
+    <div class="chart-wrap-sm" style="margin-top:.5rem"><canvas id="cpuChart"></canvas></div>
+    <div class="stats-row" style="margin-top:.75rem" id="loadAvg">
+      <div class="stat-item"><div class="val" id="load1">—</div><div class="lbl">1 min</div></div>
+      <div class="stat-item"><div class="val" id="load5">—</div><div class="lbl">5 min</div></div>
+      <div class="stat-item"><div class="val" id="load15">—</div><div class="lbl">15 min</div></div>
+    </div>
+  </div>
+
+  <!-- Memory -->
+  <div class="card">
+    <div class="card-title">Memory</div>
+    <div class="metric" id="memUsed">—<span class="metric-unit"> / —</span></div>
+    <div class="progress-wrap">
+      <div class="progress-label"><span>RAM</span><span id="memPct">—%</span></div>
+      <div class="progress-bar"><div class="progress-fill" id="memBar" style="width:0%"></div></div>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-label"><span>Swap</span><span id="swapPct">—%</span></div>
+      <div class="progress-bar"><div class="progress-fill" id="swapBar" style="width:0%"></div></div>
+    </div>
+    <div class="stats-row" style="margin-top:.75rem">
+      <div class="stat-item"><div class="val" id="memCached">—</div><div class="lbl">Cached</div></div>
+      <div class="stat-item"><div class="val" id="memBuffers">—</div><div class="lbl">Buffers</div></div>
+      <div class="stat-item"><div class="val" id="memAvail">—</div><div class="lbl">Available</div></div>
+    </div>
+  </div>
+
+  <!-- Disk -->
+  <div class="card full-width">
+    <div class="card-title">Disk</div>
+    <table class="disk-table">
+      <thead><tr><th>Mount</th><th>Device</th><th>Size</th><th>Used</th><th>Free</th><th>Usage</th><th>R/s</th><th>W/s</th></tr></thead>
+      <tbody id="diskBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Network Interfaces -->
+  <div class="card full-width">
+    <div class="card-title">Network Interfaces</div>
+    <div class="nic-grid" id="nicGrid"></div>
+  </div>
+
+  <!-- Quick Stats -->
+  <div class="card full-width">
+    <div class="card-title">Quick Stats</div>
+    <div class="quick-stats" id="quickStats">
+      <div class="qs-item"><div class="qs-icon">&#8593;</div><div class="qs-text"><div class="qs-val" id="qsPktSent">—</div><div class="qs-lbl">Packets Sent</div></div></div>
+      <div class="qs-item"><div class="qs-icon">&#8595;</div><div class="qs-text"><div class="qs-val" id="qsPktRecv">—</div><div class="qs-lbl">Packets Recv</div></div></div>
+      <div class="qs-item"><div class="qs-icon">&#9888;</div><div class="qs-text"><div class="qs-val" id="qsErrors">—</div><div class="qs-lbl">Errors</div></div></div>
+      <div class="qs-item"><div class="qs-icon">&#10005;</div><div class="qs-text"><div class="qs-val" id="qsDrops">—</div><div class="qs-lbl">Drops</div></div></div>
+      <div class="qs-item"><div class="qs-icon">&#9881;</div><div class="qs-text"><div class="qs-val" id="qsProcs">—</div><div class="qs-lbl">Processes</div></div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function fmtBytes(b,dec=1){
+  if(b==null||isNaN(b))return '—';
+  const u=['B','KB','MB','GB','TB','PB'];
+  if(b===0)return '0 B';
+  const i=Math.floor(Math.log(Math.abs(b))/Math.log(1024));
+  return (b/Math.pow(1024,i)).toFixed(dec)+' '+u[i];
+}
+function fmtBytesPrec(b){return fmtBytes(b,3)}
+function fmtRate(b){return fmtBytes(b)+'/s'}
+function fmtUptime(s){
+  const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60);
+  return `${d}d ${h}h ${m}m`;
+}
+function fmtNum(n){
+  if(n==null)return '—';
+  if(n>=1e9)return (n/1e9).toFixed(1)+'B';
+  if(n>=1e6)return (n/1e6).toFixed(1)+'M';
+  if(n>=1e3)return (n/1e3).toFixed(1)+'K';
+  return n.toString();
+}
+
+// ---------------------------------------------------------------------------
+// Charts
+// ---------------------------------------------------------------------------
+const chartDefaults={
+  responsive:true,maintainAspectRatio:false,
+  animation:{duration:400},
+  scales:{
+    x:{display:false},
+    y:{
+      beginAtZero:true,
+      grid:{color:'rgba(255,255,255,.04)'},
+      ticks:{color:'#64748b',font:{size:10},callback:v=>fmtRate(v)},
+    },
+  },
+  plugins:{legend:{display:false},tooltip:{
+    callbacks:{label:ctx=>ctx.dataset.label+': '+fmtRate(ctx.parsed.y)},
+  }},
+  elements:{point:{radius:0},line:{tension:.3,borderWidth:2}},
+};
+
+// Live traffic chart
+const trafficCtx=document.getElementById('trafficChart').getContext('2d');
+const trafficChart=new Chart(trafficCtx,{
+  type:'line',
+  data:{
+    labels:[],
+    datasets:[
+      {label:'Download (RX)',data:[],borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.08)',fill:true},
+      {label:'Upload (TX)',data:[],borderColor:'#8b5cf6',backgroundColor:'rgba(139,92,246,.08)',fill:true},
+    ]
+  },
+  options:{...chartDefaults},
+});
+
+// CPU sparkline
+const cpuCtx=document.getElementById('cpuChart').getContext('2d');
+const cpuChart=new Chart(cpuCtx,{
+  type:'line',
+  data:{labels:[],datasets:[{label:'CPU %',data:[],borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.1)',fill:true}]},
+  options:{
+    ...chartDefaults,
+    scales:{
+      ...chartDefaults.scales,
+      y:{...chartDefaults.scales.y,max:100,ticks:{...chartDefaults.scales.y.ticks,callback:v=>v+'%'}},
+    },
+    plugins:{...chartDefaults.plugins,tooltip:{callbacks:{label:ctx=>ctx.parsed.y.toFixed(1)+'%'}}},
+  },
+});
+
+// vnstat bar chart
+const vnCtx=document.getElementById('vnstatChart').getContext('2d');
+const vnstatChart=new Chart(vnCtx,{
+  type:'bar',
+  data:{
+    labels:[],
+    datasets:[
+      {label:'Download',data:[],backgroundColor:'rgba(34,197,94,.6)',borderRadius:4},
+      {label:'Upload',data:[],backgroundColor:'rgba(139,92,246,.6)',borderRadius:4},
+    ]
+  },
+  options:{
+    responsive:true,maintainAspectRatio:false,
+    animation:{duration:300},
+    scales:{
+      x:{grid:{display:false},ticks:{color:'#64748b',font:{size:10},maxRotation:45}},
+      y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.04)'},ticks:{color:'#64748b',font:{size:10},callback:v=>fmtBytes(v)}},
+    },
+    plugins:{
+      legend:{display:true,position:'top',labels:{color:'#94a3b8',font:{size:11},boxWidth:12,padding:10}},
+      tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmtBytesPrec(ctx.parsed.y)}},
+    },
+  },
+});
+
+let currentVnView='hourly';
+let latestVnstat=null;
+
+function setVnstatView(view,btn){
+  currentVnView=view;
+  document.querySelectorAll('.toggle-btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  if(latestVnstat)renderVnstat(latestVnstat);
+}
+
+function renderVnstat(vn){
+  latestVnstat=vn;
+  if(!vn||!vn.available||!vn.interfaces)return;
+  const ifaces=Object.values(vn.interfaces);
+  if(!ifaces.length)return;
+
+  // Aggregate across interfaces
+  let agg={hourly:[],daily:[],monthly:[],total_rx:0,total_tx:0};
+  for(const iface of ifaces){
+    agg.total_rx+=iface.total_rx||0;
+    agg.total_tx+=iface.total_tx||0;
+    // Use first interface's time-series (or merge)
+    if(!agg.hourly.length)agg.hourly=iface.hourly||[];
+    if(!agg.daily.length)agg.daily=iface.daily||[];
+    if(!agg.monthly.length)agg.monthly=iface.monthly||[];
+  }
+
+  // Summary stats
+  const hArr=agg.hourly;
+  const dArr=agg.daily;
+  const mArr=agg.monthly;
+  const lastH=hArr.length?hArr[hArr.length-1]:null;
+  const lastD=dArr.length?dArr[dArr.length-1]:null;
+  const lastM=mArr.length?mArr[mArr.length-1]:null;
+
+  document.getElementById('vnHour').textContent=lastH?fmtBytes((lastH.rx+lastH.tx),2):'—';
+  document.getElementById('vnDay').textContent=lastD?fmtBytes((lastD.rx+lastD.tx),2):'—';
+  document.getElementById('vnMonth').textContent=lastM?fmtBytes((lastM.rx+lastM.tx),2):'—';
+  document.getElementById('vnTotal').textContent=fmtBytesPrec(agg.total_rx+agg.total_tx);
+
+  // Chart
+  let series,labels;
+  if(currentVnView==='hourly'){
+    series=hArr.slice(-24);
+    labels=series.map(s=>s.hour+':00');
+  }else if(currentVnView==='daily'){
+    series=dArr.slice(-30);
+    labels=series.map(s=>s.date.slice(5));
+  }else{
+    series=mArr.slice(-12);
+    labels=series.map(s=>s.date);
+  }
+  vnstatChart.data.labels=labels;
+  vnstatChart.data.datasets[0].data=series.map(s=>s.rx);
+  vnstatChart.data.datasets[1].data=series.map(s=>s.tx);
+  vnstatChart.update('none');
+}
+
+// ---------------------------------------------------------------------------
+// Update UI from metrics snapshot
+// ---------------------------------------------------------------------------
+function update(d){
+  if(!d||!d.data)return;
+  const m=d.data;
+
+  // Header
+  if(m.system){
+    const s=m.system;
+    document.getElementById('hHostname').textContent=s.hostname;
+    document.getElementById('hIP').textContent=s.ip;
+    document.getElementById('hUptime').textContent=fmtUptime(s.uptime_seconds);
+    document.getElementById('hTime').textContent=new Date().toLocaleTimeString();
+    document.getElementById('qsProcs').textContent=fmtNum(s.process_count);
+  }
+
+  // CPU
+  if(m.cpu){
+    const c=m.cpu;
+    document.getElementById('cpuOverall').innerHTML=c.overall.toFixed(1)+'<span class="metric-unit">%</span>';
+    document.getElementById('cpuCores').textContent=c.core_count+' cores';
+    const freq=c.frequency_mhz?Math.round(c.frequency_mhz)+' MHz':'';
+    const temp=Object.values(c.temperatures||{})[0];
+    document.getElementById('cpuFreq').textContent=[freq,temp?temp+'°C':''].filter(Boolean).join(' · ');
+    document.getElementById('load1').textContent=c.load_average[0];
+    document.getElementById('load5').textContent=c.load_average[1];
+    document.getElementById('load15').textContent=c.load_average[2];
+  }
+
+  // Memory
+  if(m.memory){
+    const mem=m.memory;
+    document.getElementById('memUsed').innerHTML=fmtBytes(mem.used)+'<span class="metric-unit"> / '+fmtBytes(mem.total)+'</span>';
+    document.getElementById('memPct').textContent=mem.percent+'%';
+    const mBar=document.getElementById('memBar');
+    mBar.style.width=mem.percent+'%';
+    mBar.className='progress-fill'+(mem.percent>90?' warn':mem.percent>70?'':' ok');
+    document.getElementById('swapPct').textContent=mem.swap_percent+'%';
+    document.getElementById('swapBar').style.width=mem.swap_percent+'%';
+    document.getElementById('memCached').textContent=fmtBytes(mem.cached);
+    document.getElementById('memBuffers').textContent=fmtBytes(mem.buffers);
+    document.getElementById('memAvail').textContent=fmtBytes(mem.available);
+  }
+
+  // Disk
+  if(m.disk){
+    const io=m.disk.io||{};
+    let html='';
+    for(const p of m.disk.partitions){
+      html+=`<tr>
+        <td>${p.mountpoint}</td><td style="color:var(--text-dim)">${p.device}</td>
+        <td>${fmtBytes(p.total)}</td><td>${fmtBytes(p.used)}</td><td>${fmtBytes(p.free)}</td>
+        <td><div class="progress-bar" style="width:100px;display:inline-block;vertical-align:middle">
+          <div class="progress-fill${p.percent>90?' warn':''}" style="width:${p.percent}%"></div>
+        </div> <span style="font-size:.75rem;color:var(--text-dim)">${p.percent}%</span></td>
+        <td style="color:var(--green)">${io.read_bytes_sec!=null?fmtRate(io.read_bytes_sec):'—'}</td>
+        <td style="color:var(--accent2)">${io.write_bytes_sec!=null?fmtRate(io.write_bytes_sec):'—'}</td>
+      </tr>`;
+    }
+    document.getElementById('diskBody').innerHTML=html;
+  }
+
+  // Network interfaces
+  if(m.network){
+    let html='';
+    let totalPktS=0,totalPktR=0,totalErr=0,totalDrop=0;
+    for(const [name,nic] of Object.entries(m.network)){
+      totalPktS+=nic.tx_packets||0;totalPktR+=nic.rx_packets||0;
+      totalErr+=(nic.rx_errors||0)+(nic.tx_errors||0);
+      totalDrop+=(nic.rx_drops||0)+(nic.tx_drops||0);
+      html+=`<div class="nic-card">
+        <div class="nic-name">${name}</div>
+        <div class="nic-row"><span class="rx-color">&#9660; RX</span><span>${fmtRate(nic.rx_bytes_sec||0)}</span></div>
+        <div class="nic-row"><span class="tx-color">&#9650; TX</span><span>${fmtRate(nic.tx_bytes_sec||0)}</span></div>
+        <div class="nic-row"><span style="color:var(--text-dim)">Total RX</span><span>${fmtBytes(nic.rx_bytes)}</span></div>
+        <div class="nic-row"><span style="color:var(--text-dim)">Total TX</span><span>${fmtBytes(nic.tx_bytes)}</span></div>
+      </div>`;
+    }
+    document.getElementById('nicGrid').innerHTML=html;
+    document.getElementById('qsPktSent').textContent=fmtNum(totalPktS);
+    document.getElementById('qsPktRecv').textContent=fmtNum(totalPktR);
+    document.getElementById('qsErrors').textContent=fmtNum(totalErr);
+    document.getElementById('qsDrops').textContent=fmtNum(totalDrop);
+
+    // Traffic rate badge
+    const rxTotal=Object.values(m.network).reduce((s,n)=>s+(n.rx_bytes_sec||0),0);
+    const txTotal=Object.values(m.network).reduce((s,n)=>s+(n.tx_bytes_sec||0),0);
+    document.getElementById('trafficRate').textContent='↓ '+fmtRate(rxTotal)+' / ↑ '+fmtRate(txTotal);
+  }
+
+  // Live charts from history arrays
+  if(m.live_history){
+    const lh=m.live_history;
+    const labels=lh.timestamps.map(t=>{const d=new Date(t*1000);return d.getMinutes()+':'+String(d.getSeconds()).padStart(2,'0');});
+
+    trafficChart.data.labels=labels;
+    trafficChart.data.datasets[0].data=lh.net_rx;
+    trafficChart.data.datasets[1].data=lh.net_tx;
+    trafficChart.update('none');
+
+    cpuChart.data.labels=labels;
+    cpuChart.data.datasets[0].data=lh.cpu;
+    cpuChart.update('none');
+  }
+
+  // vnstat
+  if(m.vnstat)renderVnstat(m.vnstat);
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket
+// ---------------------------------------------------------------------------
+let ws=null;
+let reconnectDelay=1000;
+const statusEl=document.getElementById('connStatus');
+
+function connectWS(){
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  ws=new WebSocket(proto+'//'+location.host+'/ws/metrics');
+
+  ws.onopen=()=>{
+    statusEl.className='conn-status ok';
+    statusEl.title='Connected';
+    reconnectDelay=1000;
+  };
+
+  ws.onmessage=e=>{
+    try{update(JSON.parse(e.data))}catch(err){console.error(err)}
+  };
+
+  ws.onclose=()=>{
+    statusEl.className='conn-status err';
+    statusEl.title='Disconnected';
+    setTimeout(connectWS,reconnectDelay);
+    reconnectDelay=Math.min(reconnectDelay*1.5,15000);
+  };
+
+  ws.onerror=()=>ws.close();
+}
+
+// Token refresh
+async function refreshToken(){
+  try{
+    const res=await fetch('/api/v1/auth/refresh',{method:'POST'});
+    if(!res.ok)window.location.href='/login';
+  }catch(e){}
+}
+setInterval(refreshToken,12*60*1000); // every 12 min
+
+async function logout(){
+  await fetch('/api/v1/auth/logout',{method:'POST'});
+  window.location.href='/login';
+}
+
+// Start
+connectWS();
+</script>
+</body>
+</html>

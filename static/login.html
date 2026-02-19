@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XMonitor - Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0e17;--card:rgba(15,23,42,.7);--border:rgba(99,102,241,.2);
+  --accent:#6366f1;--accent-glow:rgba(99,102,241,.3);--text:#e2e8f0;
+  --text-dim:#94a3b8;--danger:#ef4444;--success:#22c55e;
+}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);min-height:100vh;
+  display:flex;align-items:center;justify-content:center;
+  background-image:radial-gradient(ellipse at 50% 0%,rgba(99,102,241,.08) 0%,transparent 60%);
+}
+.login-container{
+  width:100%;max-width:400px;padding:2rem;
+}
+.login-card{
+  background:var(--card);border:1px solid var(--border);border-radius:16px;
+  padding:2.5rem;backdrop-filter:blur(20px);
+  box-shadow:0 8px 32px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.logo{
+  text-align:center;margin-bottom:2rem;
+}
+.logo h1{
+  font-size:1.75rem;font-weight:700;letter-spacing:-.02em;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.logo p{color:var(--text-dim);font-size:.875rem;margin-top:.25rem}
+.form-group{margin-bottom:1.25rem}
+.form-group label{
+  display:block;font-size:.8rem;color:var(--text-dim);
+  margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.05em;
+}
+.form-group input{
+  width:100%;padding:.75rem 1rem;background:rgba(15,23,42,.9);
+  border:1px solid var(--border);border-radius:8px;color:var(--text);
+  font-size:.95rem;outline:none;transition:border-color .2s,box-shadow .2s;
+}
+.form-group input:focus{
+  border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);
+}
+.btn{
+  width:100%;padding:.8rem;border:none;border-radius:8px;font-size:.95rem;
+  font-weight:600;cursor:pointer;transition:all .2s;
+  background:linear-gradient(135deg,#6366f1,#7c3aed);color:#fff;
+  margin-top:.5rem;
+}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 16px var(--accent-glow)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.error{
+  background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);
+  border-radius:8px;padding:.75rem;margin-bottom:1rem;
+  color:var(--danger);font-size:.85rem;display:none;text-align:center;
+}
+.error.show{display:block}
+</style>
+</head>
+<body>
+<div class="login-container">
+  <div class="login-card">
+    <div class="logo">
+      <h1>XMonitor</h1>
+      <p>Server Monitoring Dashboard</p>
+    </div>
+    <div id="error" class="error"></div>
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn" id="loginBtn">Sign In</button>
+    </form>
+  </div>
+</div>
+<script>
+const form=document.getElementById('loginForm');
+const errEl=document.getElementById('error');
+const btn=document.getElementById('loginBtn');
+
+form.addEventListener('submit',async e=>{
+  e.preventDefault();
+  errEl.classList.remove('show');
+  btn.disabled=true;btn.textContent='Signing in...';
+  try{
+    const res=await fetch('/api/v1/auth/login',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        username:document.getElementById('username').value,
+        password:document.getElementById('password').value,
+      }),
+    });
+    if(res.ok){window.location.href='/';}
+    else{
+      const data=await res.json();
+      errEl.textContent=data.detail||'Login failed';
+      errEl.classList.add('show');
+    }
+  }catch(e){
+    errEl.textContent='Connection error';errEl.classList.add('show');
+  }
+  btn.disabled=false;btn.textContent='Sign In';
+});
+</script>
+</body>
+</html>

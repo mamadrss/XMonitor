@@ -1,0 +1,26 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  secret_key: "change-me-on-first-run"
+
+auth:
+  username: "admin"
+  # Default password: "admin" - change on first run
+  # Generate with: python3 -c "import bcrypt; print(bcrypt.hashpw(b'admin', bcrypt.gensalt()).decode())"
+  password_hash: "$2b$12$LJ3m4ys3Lg2Kl8YGMqV5/.QbGMCfCpiRE.MFsMKqhBSjnGMo/MgJG"
+  ip_whitelist: []
+  rate_limit_attempts: 5
+  rate_limit_window: 60
+
+monitoring:
+  interfaces: []  # auto-detect if empty
+  collection_interval: 2
+  history_collection_interval: 60
+  history_retention_days: 30
+  vnstat_cache_ttl: 1
+
+master_server:
+  enabled: false
+  url: ""
+  api_key: ""
+  server_id: ""  # auto-generated UUID on first run
